@@ -19,3 +19,6 @@ else
 	# staying alive!
 	sh
 fi
+
+# without this, the system will become a zombie
+poweroff
