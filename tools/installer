@@ -128,7 +128,8 @@ def installSystem(archive, mountPoint, device):
 	print
 
 	# remove the archive
-	shutil.rmtree(mountPoint+'/'+os.path.basename(archive))
+	if not SIMULATION:
+		shutil.rmtree(mountPoint+'/'+os.path.basename(archive))
 
 	# mount filesystems in bind mode
 	if not SIMULATION:
