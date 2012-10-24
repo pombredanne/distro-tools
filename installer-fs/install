@@ -17,4 +17,5 @@ if [ $? == 0 ]; then
 else
 	echo 'Failure!'
 	# staying alive!
+	sh
 fi
