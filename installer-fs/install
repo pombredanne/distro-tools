@@ -12,13 +12,14 @@ echo
 /usr/bin/installer
 
 if [ $? == 0 ]; then
-	echo 'Success. Shutdown!'
-	poweroff
+	echo 'Success!'
 else
 	echo 'Failure!'
-	# staying alive!
-	sh
+	# launch a shell
+	/bin/sh
 fi
 
 # without this, the system will become a zombie
+echo
+echo 'Shutdown...'
 poweroff
