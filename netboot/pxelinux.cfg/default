@@ -3,4 +3,4 @@ say "Booting Officine Maya installation system..."
 
 label Linux
 	kernel /vmlinuz
-	append initrd=/initrd.gz root=/dev/nfs ip=dhcp nfsroot=<SERVER:/PATH/TO/NFSROOT> quiet ro loglevel=0
+	append initrd=/initrd.gz root=/dev/nfs ip=dhcp nfsroot=<SERVER:/PATH/TO/NFSROOT> quiet ro loglevel=0 console=tty4 consoleblank=0

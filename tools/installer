@@ -116,19 +116,18 @@ EOF""" % device
 def installSystem(archive, mountPoint, device):
 	""" Installs the compressed filesystem in target mount point. """
 
-	print "Copying fs image..."
+	print "Copying compressed system image..."
 	if not SIMULATION:
 			shutil.copy(archive, mountPoint)
 	print
 
 	# extract the archive
-	print "Installing..."
+	print "Installing system..."
 	if not SIMULATION:
 			_exec("tar xzf %s" % os.path.basename(archive), cwd=mountPoint)
 	print
 
 	# mount filesystems in bind mode
-	print "Mounting OS filesystems..."
 	if not SIMULATION:
 		for fs in ["/dev", "/sys", "/proc"]:
 			_exec("mount -o bind %s %s" % (fs, mountPoint + fs))
@@ -197,7 +196,6 @@ if __name__ == "__main__":
 		print
 
 		# installation
-		print "Installing system..."
 		installSystem(PAYLOAD, TARGET_MOUNT_DIR, dev)
 
 	except Exception as err:
