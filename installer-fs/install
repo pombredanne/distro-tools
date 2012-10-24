@@ -1,0 +1,20 @@
+#!/bin/sh
+
+# welcome message
+clear
+echo "------------------------------------"
+echo "Officine Maya SRL"
+echo "Le.Dy 1000 series firmware installer"
+echo "------------------------------------"
+echo
+
+# all is done by our branded installer (:
+/usr/bin/installer
+
+if [ $? == 0 ]; then
+	echo 'Success. Shutdown!'
+	poweroff
+else
+	echo 'Failure!'
+	# staying alive!
+fi

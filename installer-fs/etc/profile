@@ -1,0 +1,5 @@
+clear
+echo "Officine Maya"
+echo `date`
+echo "Le.Dy1000 series installation system"
+echo

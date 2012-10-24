@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# mount vital filesystems
+mount none -t devtmpfs  /dev	-o mode=666
+mount none -t tmpfs     /tmp	-o mode=1777
+mount none -t proc      /proc
+mount none -t sysfs     /sys

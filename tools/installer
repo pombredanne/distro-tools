@@ -1,0 +1,204 @@
+#!/usr/bin/python
+
+import subprocess as sp
+import os
+import os.path
+import re
+import shutil
+
+SIMULATION = True
+MIN_DISK_SPACE = 1024
+TARGET_MOUNT_DIR = "/tmp/target"
+PAYLOAD = "/opt/payload.tgz"
+
+def error(msg):
+	print
+	print 'ERROR:', msg
+	print 'Cleaning up...'
+	cleanup()
+	print 
+	exit(1)
+
+def cleanup():
+	if not SIMULATION:
+		with open(os.devnull, 'wb') as devnull:
+			for fs in ["/dev", "/sys", "/proc", ""]:
+				sp.Popen("umount " + TARGET_MOUNT_DIR + fs, shell=True, stdout=devnull, stderr=devnull).wait()
+
+
+def _exec(cmd, verbose=False, cwd=None, env=None):
+	""" Executes a command in a subprocess, suppressing all output. If the
+	command fails, standard error is printed and the program terminates with
+	error code 1. """
+
+	with open(os.devnull, 'w') as devnull:
+		if verbose:
+			proc = sp.Popen(cmd, shell=True, env=env, cwd=cwd)
+		else:
+			proc = sp.Popen(cmd, shell=True, stdin=devnull, stdout=sp.PIPE, stderr=sp.PIPE, env=env, cwd=cwd)
+
+		ret = proc.communicate()
+		if proc.returncode:
+			error(' '.join(ret))
+
+def getDisks():
+	""" Get a list of tuples (device, size, unit) with information about
+	detected drives. Uses fdisk utility. """
+
+	exp = re.compile(r'Disk\s(/dev/sd\w):\s(\d+\.?\d*)\s([GM])')
+
+	cmd = ['fdisk', '-l'] 
+	out = sp.Popen(cmd, stdout=sp.PIPE, stderr=sp.PIPE).communicate()
+
+	match = exp.findall(out[0])
+	return match
+
+def getPartitions(device):
+	""" Get partition numbers from device's partition table. """
+
+	exp = re.compile(device + r'(\d+)\s')
+
+	cmd = ['fdisk', '-l', device]
+
+	out = sp.Popen(cmd, stdout=sp.PIPE, stderr=sp.PIPE).communicate()
+
+	match = exp.findall(out[0])
+	return match
+
+def wipePartitionTable(device):
+	""" Dangerous!!! Wipes the entire partition table on the device! """
+
+	cmd = \
+"""
+fdisk %s << EOF
+o
+w
+EOF""" % device
+	if SIMULATION:
+		return
+	else:
+		_exec(cmd)
+
+def createRootPartition(device, mountPoint):
+	""" Creates a root filesystem partition on selected device, format it and mount in target directory. """
+
+	cmd = \
+"""
+fdisk %s << EOF
+n
+p
+1
+
+
+a
+1
+w
+EOF""" % device
+	
+	if SIMULATION:
+		return
+	else:
+		_exec(cmd)
+
+		if os.path.exists(mountPoint):
+			os.rmtree(mountPoint)
+
+		os.mkdir(mountPoint)
+
+		commands = [
+			"mkfs.ext2 %s1" % device,
+			"mount %s1 %s" % (device, mountPoint),
+		]
+
+		for cmd in commands:
+			_exec(cmd)
+
+def installSystem(archive, mountPoint, device):
+	""" Installs the compressed filesystem in target mount point. """
+
+	print "Copying fs image..."
+	if not SIMULATION:
+			shutil.copy(archive, mountPoint)
+	print
+
+	# extract the archive
+	print "Installing..."
+	if not SIMULATION:
+			_exec("tar xzf %s" % os.path.basename(archive), cwd=mountPoint)
+	print
+
+	# mount filesystems in bind mode
+	print "Mounting OS filesystems..."
+	if not SIMULATION:
+		for fs in ["/dev", "/sys", "/proc"]:
+			_exec("mount -o bind %s %s" % (fs, mountPoint + fs))
+	print
+
+	# install bootloader
+	print "Installing bootloader..."
+	if not SIMULATION:
+		_exec("chroot %s update-grub" % mountPoint)
+		_exec("chroot %s grub-install %s" % (mountPoint, device))
+	print
+
+	# unmount binded fs
+	print "Unmounting filesystems..."
+	if not SIMULATION:
+		for fs in ["/dev", "/sys", "/proc", ""]:
+			_exec("umount %s" % mountPoint + fs)
+	print
+
+if __name__ == "__main__":
+	try:
+		# --- Disk partitioning --- #
+		disks = getDisks()
+		if not disks:
+			error("No disks found!")
+
+		print "Disks found:"
+		for d in disks:
+			print '  %s\t(%s %sB)' % d
+		print
+
+		# check if there's enough size on some device to install the system
+		dev = None
+		for d in disks:
+			size = float(d[1])
+			factor = d[2]
+
+			if factor == 'G':
+				size *= 1000
+
+			if size >= MIN_DISK_SPACE and not dev:
+				dev = d[0]
+		
+		if not dev:
+			error("No disk with enough space found!")
+		DEVICE = dev
+
+		print "Installing on:", dev
+		print
+
+		# look if there are any partitions
+		parts = getPartitions(dev)
+
+		if parts:
+			print "Wiping partitions on %s:" % dev
+			for p in parts:
+				print '  %s%d' % (dev, int(p))
+
+			# WIPE! >_<
+			wipePartitionTable(dev)
+			print
+
+		# create the root partition and format it
+		print "Creating root partition and formatting it..."
+		createRootPartition(dev, TARGET_MOUNT_DIR)
+		print
+
+		# installation
+		print "Installing system..."
+		installSystem(PAYLOAD, TARGET_MOUNT_DIR, dev)
+
+	except Exception as err:
+		error(err)
