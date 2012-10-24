@@ -127,11 +127,13 @@ def installSystem(archive, mountPoint, device):
 			_exec("tar xzf %s" % os.path.basename(archive), cwd=mountPoint)
 	print
 
+	# remove the archive
+	shutil.rmtree(mountPoint+os.path.basename(archive))
+
 	# mount filesystems in bind mode
 	if not SIMULATION:
 		for fs in ["/dev", "/sys", "/proc"]:
 			_exec("mount -o bind %s %s" % (fs, mountPoint + fs))
-	print
 
 	# install bootloader
 	print "Installing bootloader..."
@@ -141,11 +143,9 @@ def installSystem(archive, mountPoint, device):
 	print
 
 	# unmount binded fs
-	print "Unmounting filesystems..."
 	if not SIMULATION:
 		for fs in ["/dev", "/sys", "/proc", ""]:
 			_exec("umount %s" % mountPoint + fs)
-	print
 
 if __name__ == "__main__":
 	try:
