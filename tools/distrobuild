@@ -8,34 +8,57 @@ import json
 import re
 import subprocess
 import logging as log
+import time
+
+VERBOSE = False
 
 # by default, we want logging enabled and show timestamps
 log.basicConfig(level=log.INFO, format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %H:%M:%S')
 
-def _launchProc(cmd, verbose=False, env=None):
+def _launchProc(cmd, env=None):
 	""" Executes a command in a subprocess, suppressing all output. If the command fails (errcode is not 0), the stderr
 	is printed and the script exits with code 1. """
 	with open(os.devnull, 'w') as devnull:
-		if verbose:
+		if VERBOSE:
 			proc = subprocess.Popen(cmd, shell=True, env=env)
 		else:
 			proc = subprocess.Popen(cmd, shell=True, stdin=devnull, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 		ret = proc.communicate()
 		if proc.returncode:
-			log.error("Error: %s" % '\n'.join(ret))
+			if not VERBOSE:
+				log.error("Error: " + '\n'.join(ret))
 			exit(1)
 
 def loadConfig(filename):
 	with open(filename) as f:
 		return json.load(f)
 
-def bootstrap(release, target, mirror, arch="amd64"):
+def bootstrap(release, components, target, mirror, arch):
 	""" Crate a bootstrap chroot-ready system in a target directory. """
-	cmd = "debootstrap --variant=minbase --arch=%s %s %s %s" % (arch, release, target, mirror)
+	components = ','.join(components)
+	cmd = "debootstrap --variant=minbase --components=%s --arch=%s %s %s %s" % (components, arch, release, target, mirror)
 	_launchProc(cmd)
 
-def installPackages(packages, target):
+def installPackages(packages, target, release, mirrors):
 	""" Given a list of packages, installs them in a target chroot-able directory. """
+
+	# mount some vital filesystems...
+	for fs in ["/dev", "/proc", "/sys"]:
+		_launchProc("mount -o bind %s %s" % (fs, target+fs))
+
+	# add additional entries to target's /etc/apt/sources.list file
+	if mirrors:
+		with open(target + '/etc/apt/sources.list', 'a') as sources_list:
+			for line in mirrors:
+				if not line:
+					continue
+
+				components = ""
+
+				if len(line) > 1:
+					components = ' ' + ' '.join(line[1:])
+
+				sources_list.write('deb ' + line[0] + ' ' + release + components)
 
 	# first, sync with repo
 	log.info("Updating package lists...")
@@ -50,19 +73,37 @@ def installPackages(packages, target):
 
 	for p in packages:
 		log.info("Installing '" + p + "'...")
-		cmd = "chroot %s apt-get -y install %s" % (target, p)
-		_launchProc(cmd, False, env)
+		cmd = "chroot %s apt-get -y --force-yes install %s" % (target, p)
+		_launchProc(cmd, env)
+
+	# clean cache
+	_launchProc("chroot %s apt-get -y clean" % target)
+	_launchProc("chroot %s apt-get -y autoclean" % target)
+
+	# umount filesystems
+	for fs in ["/dev", "/proc", "/sys"]:
+		with open(os.devnull, 'wb') as devnull:
+			subprocess.call("umount " + target + fs, shell=True, stdout=devnull, stderr=devnull)
 
 if __name__ == "__main__":
+	startTime = time.time()
+
 	cfg = loadConfig("distro.conf")
 	log.info("JSON configuration file loaded")
+
+	try:
+		VERBOSE = cfg['verbose']
+	except:
+		pass
 
 	if not os.getuid() == 0:
 		log.error("Need to be launched as root!")
 		exit(1)
 
 	log.info("Creating bootstrap system...")
-	bootstrap(cfg['release'], "distro", cfg['mirror'])
+	bootstrap(cfg['release'], cfg['components'], "distro", cfg['bootstrap-mirror'], cfg['arch'])
 
 	log.info("Installing packages...")
-	installPackages(cfg['packages'], "distro")
+	installPackages(cfg['packages'], "distro", cfg['release'], cfg['package-mirrors'])
+
+	log.info("Finished in %s minutes." % str((time.time() - startTime)/60.0))
