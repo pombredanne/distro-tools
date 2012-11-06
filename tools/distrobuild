@@ -35,6 +35,7 @@ def loadConfig(filename):
 
 def bootstrap(release, components, target, mirror, arch):
 	""" Crate a bootstrap chroot-ready system in a target directory. """
+
 	components = ','.join(components)
 	cmd = "debootstrap --variant=minbase --components=%s --arch=%s %s %s %s" % (components, arch, release, target, mirror)
 	_launchProc(cmd)
@@ -43,8 +44,8 @@ def installPackages(packages, target, release, mirrors):
 	""" Given a list of packages, installs them in a target chroot-able directory. """
 
 	# mount some vital filesystems...
-	for fs in ["/dev", "/proc", "/sys"]:
-		_launchProc("mount -o bind %s %s" % (fs, target+fs))
+	#for fs in ["/dev", "/proc", "/sys"]:
+	#	_launchProc("mount -o bind %s %s" % (fs, target+fs))
 
 	# add additional entries to target's /etc/apt/sources.list file
 	if mirrors:
@@ -61,7 +62,7 @@ def installPackages(packages, target, release, mirrors):
 				sources_list.write('deb ' + line[0] + ' ' + release + components)
 
 	# first, sync with repo
-	log.info("Updating package lists...")
+	log.info("   Updating package lists...")
 	cmd = "chroot %s apt-get -y update" % target
 	_launchProc(cmd)
 
@@ -72,7 +73,7 @@ def installPackages(packages, target, release, mirrors):
 	}
 
 	for p in packages:
-		log.info("Installing '" + p + "'...")
+		log.info("   Installing '" + p + "'...")
 		cmd = "chroot %s apt-get -y --force-yes install %s" % (target, p)
 		_launchProc(cmd, env)
 
@@ -81,9 +82,9 @@ def installPackages(packages, target, release, mirrors):
 	_launchProc("chroot %s apt-get -y autoclean" % target)
 
 	# umount filesystems
-	for fs in ["/dev", "/proc", "/sys"]:
-		with open(os.devnull, 'wb') as devnull:
-			subprocess.call("umount " + target + fs, shell=True, stdout=devnull, stderr=devnull)
+	#for fs in ["/dev", "/proc", "/sys"]:
+	#	with open(os.devnull, 'wb') as devnull:
+	#		subprocess.call("umount " + target + fs, shell=True, stdout=devnull, stderr=devnull)
 
 if __name__ == "__main__":
 	startTime = time.time()
@@ -100,10 +101,36 @@ if __name__ == "__main__":
 		log.error("Need to be launched as root!")
 		exit(1)
 
-	log.info("Creating bootstrap system...")
-	bootstrap(cfg['release'], cfg['components'], "distro", cfg['bootstrap-mirror'], cfg['arch'])
+	for path in ['bootstrap', 'devel', 'release']:
+		if os.path.exists(path):
+			log.info("Wiping '%s'..." % path)
+			shutil.rmtree(path)
 
-	log.info("Installing packages...")
-	installPackages(cfg['packages'], "distro", cfg['release'], cfg['package-mirrors'])
+	log.info("Building bootstrap system...")
+	bootstrap(cfg['release'], cfg['components'], "bootstrap", cfg['bootstrap-mirror'], cfg['arch'])
+
+	if len(sys.argv) > 1:
+		removeBootstrap = False
+
+		if 'release' in sys.argv:
+			log.info("Building release system...")
+			_launchProc("cp -r bootstrap release")
+			installPackages(cfg['packages'], "release", cfg['release'], cfg['package-mirrors'])
+			removeBootstrap = True
+
+		if 'devel' in sys.argv:
+			log.info("Building development system...")
+			_launchProc("cp -r bootstrap devel")
+			installPackages(cfg['packages-dev'], "devel", cfg['release'], cfg['package-mirrors'])
+			removeBootstrap = True
+
+		if removeBootstrap:
+			shutil.rmtree("bootstrap")
+
+	# check if there are addons to be merged with target filesystems and eventually apply them
+	for addon in [('devel-addon', 'devel'), ('release-addon', 'release')]:
+		if os.path.exists(addon[0]) and os.path.exists(addon[1]):
+			log.info("Applying %s..." % addon[0])
+			_launchProc("cp -r %s/* %s" % addon)
 
 	log.info("Finished in %s minutes." % str((time.time() - startTime)/60.0))
