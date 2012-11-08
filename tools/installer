@@ -16,7 +16,7 @@ def error(msg):
 	print 'ERROR:', msg
 	print 'Cleaning up...'
 	cleanup()
-	print 
+	print
 	exit(1)
 
 def cleanup():
@@ -47,7 +47,7 @@ def getDisks():
 
 	exp = re.compile(r'Disk\s(/dev/sd\w):\s(\d+\.?\d*)\s([GM])')
 
-	cmd = ['fdisk', '-l'] 
+	cmd = ['fdisk', '-l']
 	out = sp.Popen(cmd, stdout=sp.PIPE, stderr=sp.PIPE).communicate()
 
 	match = exp.findall(out[0])
@@ -94,7 +94,7 @@ a
 1
 w
 EOF""" % device
-	
+
 	if SIMULATION:
 		return
 	else:
@@ -116,20 +116,11 @@ EOF""" % device
 def installSystem(archive, mountPoint, device):
 	""" Installs the compressed filesystem in target mount point. """
 
-	print "Copying compressed system image..."
-	if not SIMULATION:
-			shutil.copy(archive, mountPoint)
-	print
-
 	# extract the archive
 	print "Installing system..."
 	if not SIMULATION:
-			_exec("tar xzf %s" % os.path.basename(archive), cwd=mountPoint)
+			_exec("tar xzf %s" % archive, cwd=mountPoint)
 	print
-
-	# remove the archive
-	if not SIMULATION:
-		shutil.rmtree(mountPoint+'/'+os.path.basename(archive))
 
 	# mount filesystems in bind mode
 	if not SIMULATION:
@@ -139,9 +130,17 @@ def installSystem(archive, mountPoint, device):
 	# install bootloader
 	print "Installing bootloader..."
 	if not SIMULATION:
-		_exec("chroot %s update-grub" % mountPoint)
+		_exec("chroot %s update-grub2" % mountPoint)
 		_exec("chroot %s grub-install %s" % (mountPoint, device))
 	print
+
+	# launch setup script in target, if there's any
+	if not SIMULATION:
+		if os.path.exists(mountPoint+'/setup'):
+			print "Executing post-install setup script..."
+			_exec("chroot %s /setup" % mountPoint)
+			os.remove(mountPoint+'/setup')
+			print
 
 	# unmount binded fs
 	if not SIMULATION:
@@ -171,7 +170,7 @@ if __name__ == "__main__":
 
 			if size >= MIN_DISK_SPACE and not dev:
 				dev = d[0]
-		
+
 		if not dev:
 			error("No disk with enough space found!")
 		DEVICE = dev

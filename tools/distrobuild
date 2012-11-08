@@ -9,6 +9,7 @@ import re
 import subprocess
 import logging as log
 import time
+import argparse
 
 VERBOSE = False
 
@@ -16,7 +17,7 @@ VERBOSE = False
 log.basicConfig(level=log.INFO, format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %H:%M:%S')
 
 def _launchProc(cmd, env=None):
-	""" Executes a command in a subprocess, suppressing all output. If the command fails (errcode is not 0), the stderr
+	""" Executes a command in a subprocess, suppressing all output. If the command fails (return code is not 0), the stderr
 	is printed and the script exits with code 1. """
 	with open(os.devnull, 'w') as devnull:
 		if VERBOSE:
@@ -31,7 +32,10 @@ def _launchProc(cmd, env=None):
 
 def loadConfig(filename):
 	with open(filename) as f:
-		return json.load(f)
+		try:
+			return json.load(f)
+		except Exception as err:
+			log.error(err)
 
 def bootstrap(release, components, target, mirror, arch):
 	""" Crate a bootstrap chroot-ready system in a target directory. """
@@ -42,10 +46,6 @@ def bootstrap(release, components, target, mirror, arch):
 
 def installPackages(packages, target, release, mirrors):
 	""" Given a list of packages, installs them in a target chroot-able directory. """
-
-	# mount some vital filesystems...
-	#for fs in ["/dev", "/proc", "/sys"]:
-	#	_launchProc("mount -o bind %s %s" % (fs, target+fs))
 
 	# add additional entries to target's /etc/apt/sources.list file
 	if mirrors:
@@ -81,56 +81,92 @@ def installPackages(packages, target, release, mirrors):
 	_launchProc("chroot %s apt-get -y clean" % target)
 	_launchProc("chroot %s apt-get -y autoclean" % target)
 
-	# umount filesystems
-	#for fs in ["/dev", "/proc", "/sys"]:
-	#	with open(os.devnull, 'wb') as devnull:
-	#		subprocess.call("umount " + target + fs, shell=True, stdout=devnull, stderr=devnull)
-
 if __name__ == "__main__":
 	startTime = time.time()
 
-	cfg = loadConfig("distro.conf")
+	# add some options and argument parsing stuff!
+	parser = argparse.ArgumentParser()
+
+	parser.add_argument("targets", metavar="target", default=["release", "devel"], help="distribution target to build (release, devel, default: both)", nargs="*")
+	parser.add_argument("-v", "--verbose", help="print out everything!", action="store_true")
+	parser.add_argument("-r", "--rebuild", help="rebuild targets from scratch, wiping any existing ones", action="store_true")
+	parser.add_argument("-p", "--pack", help="compress the resulting targets", action="store_true")
+	parser.add_argument("--config", metavar="FILE", help="path to JSON configuration file (default: distro.conf)", default="distro.conf")
+
+	args = parser.parse_args()
+
+	# check arguments validity
+	for t in args.targets:
+		if not t in ["release", "devel"]:
+			log.error("Unknown target '%s'!" % t)
+			exit(1)
+
+	# load configuration
+	cfg = loadConfig(args.config)
 	log.info("JSON configuration file loaded")
 
-	try:
-		VERBOSE = cfg['verbose']
-	except:
-		pass
+	VERBOSE = args.verbose
 
+	# check if the script is launched as root
 	if not os.getuid() == 0:
 		log.error("Need to be launched as root!")
 		exit(1)
 
-	for path in ['bootstrap', 'devel', 'release']:
-		if os.path.exists(path):
-			log.info("Wiping '%s'..." % path)
-			shutil.rmtree(path)
+	# in case of interrupted last run or fresh new build request, cleanup
+	# everything
+	if os.path.exists(".lock"):
+		log.info("Last run was interrupted!")
+		os.remove(".lock")
+		args.rebuild = True
+	elif not args.rebuild:
+		fresh = True
+		for path in ['.devel', '.release']:
+			if os.path.exists(path):
+				fresh = False
+		args.rebuild = fresh
 
-	log.info("Building bootstrap system...")
-	bootstrap(cfg['release'], cfg['components'], "bootstrap", cfg['bootstrap-mirror'], cfg['arch'])
+	_launchProc("touch .lock")
 
-	if len(sys.argv) > 1:
-		removeBootstrap = False
+	if args.rebuild:
+		log.info("Proceeding with fresh build...")
+		for t in args.targets:
+			for path in [t, '.'+t]:
+				if os.path.exists(path):
+					log.info("   Wiping '%s'..." % path)
+					shutil.rmtree(path)
 
-		if 'release' in sys.argv:
+		log.info("Building bootstrap system...")
+		bootstrap(cfg['release'], cfg['components'], ".bootstrap", cfg['bootstrap-mirror'], cfg['arch'])
+
+		if 'release' in args.targets:
 			log.info("Building release system...")
-			_launchProc("cp -r bootstrap release")
-			installPackages(cfg['packages'], "release", cfg['release'], cfg['package-mirrors'])
-			removeBootstrap = True
+			_launchProc("cp -r .bootstrap .release")
+			installPackages(cfg['packages'], ".release", cfg['release'], cfg['package-mirrors'])
 
-		if 'devel' in sys.argv:
+		if 'devel' in args.targets:
 			log.info("Building development system...")
-			_launchProc("cp -r bootstrap devel")
-			installPackages(cfg['packages-dev'], "devel", cfg['release'], cfg['package-mirrors'])
-			removeBootstrap = True
+			_launchProc("cp -r .bootstrap .devel")
+			installPackages(cfg['packages-dev'], ".devel", cfg['release'], cfg['package-mirrors'])
 
-		if removeBootstrap:
-			shutil.rmtree("bootstrap")
+		log.info("Cleaning up bootstrap system...")
+		shutil.rmtree(".bootstrap")
 
-	# check if there are addons to be merged with target filesystems and eventually apply them
-	for addon in [('devel-addon', 'devel'), ('release-addon', 'release')]:
-		if os.path.exists(addon[0]) and os.path.exists(addon[1]):
-			log.info("Applying %s..." % addon[0])
-			_launchProc("cp -r %s/* %s" % addon)
+	# apply add-ons
+	for t in args.targets:
+		if os.path.exists("." + t):
+			if not os.path.exists(t + "-addon"):
+				log.warning("Add-on for target '%s' does not exist, skipped!" % t)
+				continue
 
+			log.info("Applying '%s-addon'..." % t)
+			if os.path.exists(t):
+				shutil.rmtree(t)
+			_launchProc("cp -r .%s %s" % (t, t))
+			_launchProc("cp -r %s-addon/* %s" % (t, t))
+
+		else:
+			log.warning("Target '%s' was not built, add-on applying skipped!" % t)
+			continue
+
+	os.remove(".lock")
 	log.info("Finished in %s minutes." % str((time.time() - startTime)/60.0))
