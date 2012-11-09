@@ -136,7 +136,7 @@ def installSystem(archive, mountPoint, device):
 				'BOOTLOADER_DEVICE': device,
 			}
 			print "Executing post-install setup script..."
-			_exec("chroot %s /setup" % mountPoint)
+			_exec("chroot %s /setup" % mountPoint, env=env)
 			os.remove(mountPoint+'/setup')
 			print
 
