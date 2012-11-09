@@ -127,16 +127,14 @@ def installSystem(archive, mountPoint, device):
 		for fs in ["/dev", "/sys", "/proc"]:
 			_exec("mount -o bind %s %s" % (fs, mountPoint + fs))
 
-	# install bootloader
-	print "Installing bootloader..."
-	if not SIMULATION:
-		_exec("chroot %s update-grub2" % mountPoint)
-		_exec("chroot %s grub-install %s" % (mountPoint, device))
-	print
-
 	# launch setup script in target, if there's any
 	if not SIMULATION:
 		if os.path.exists(mountPoint+'/setup'):
+			env = {
+				'DEBIAN_FRONTEND': "noninteractive",
+				'PATH': "/bin:/sbin:/usr/bin:/usr/sbin",
+				'BOOTLOADER_DEVICE': device,
+			}
 			print "Executing post-install setup script..."
 			_exec("chroot %s /setup" % mountPoint)
 			os.remove(mountPoint+'/setup')
