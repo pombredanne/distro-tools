@@ -44,8 +44,14 @@ def bootstrap(release, components, target, mirror, arch):
 	cmd = "debootstrap --variant=minbase --components=%s --arch=%s %s %s %s" % (components, arch, release, target, mirror)
 	_launchProc(cmd)
 
-def installPackages(packages, target, release, mirrors):
+def installPackages(packages, target, release, mirrors, sysmount):
 	""" Given a list of packages, installs them in a target chroot-able directory. """
+
+	if sysmount:
+		log.info("   Mounting filesystems...")
+		for fs in [('proc', '/proc'), ('sysfs', '/sys')]:
+			log.info("      " + fs[1])
+			_launchProc("mount none -t %s %s" % (fs[0], target+fs[1]))
 
 	# add additional entries to target's /etc/apt/sources.list file
 	if mirrors:
@@ -80,6 +86,13 @@ def installPackages(packages, target, release, mirrors):
 	# clean cache
 	_launchProc("chroot %s apt-get -y clean" % target)
 	_launchProc("chroot %s apt-get -y autoclean" % target)
+
+	if sysmount:
+		#log.info("   Unmounting filesystems...")
+		#for fs in ['/sys', '/proc']:
+		#	log.info("      " + fs)
+		#	_launchProc("umount %s" % target+fs)
+		pass
 
 if __name__ == "__main__":
 	startTime = time.time()
@@ -138,15 +151,21 @@ if __name__ == "__main__":
 		log.info("Building bootstrap system...")
 		bootstrap(cfg['release'], cfg['components'], ".bootstrap", cfg['bootstrap-mirror'], cfg['arch'])
 
+		mountfs = False
+		try:
+			mountfs = cfg['sysmount']
+		except:
+			pass
+
 		if 'release' in args.targets:
 			log.info("Building release system...")
 			_launchProc("cp -r .bootstrap .release")
-			installPackages(cfg['packages'], ".release", cfg['release'], cfg['package-mirrors'])
+			installPackages(cfg['packages'], ".release", cfg['release'], cfg['package-mirrors'], mountfs)
 
 		if 'devel' in args.targets:
 			log.info("Building development system...")
 			_launchProc("cp -r .bootstrap .devel")
-			installPackages(cfg['packages-dev'], ".devel", cfg['release'], cfg['package-mirrors'])
+			installPackages(cfg['packages-dev'], ".devel", cfg['release'], cfg['package-mirrors'], mountfs)
 
 		log.info("Cleaning up bootstrap system...")
 		shutil.rmtree(".bootstrap")
