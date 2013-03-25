@@ -16,7 +16,8 @@ VERBOSE = False
 # by default, we want logging enabled and show timestamps
 log.basicConfig(level=log.INFO, format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %H:%M:%S')
 
-def _launchProc(cmd, env=None):
+
+def launchProc(cmd, env=None):
 	""" Executes a command in a subprocess, suppressing all output. If the command fails (return code is not 0), the stderr
 	is printed and the script exits with code 1. """
 	with open(os.devnull, 'w') as devnull:
@@ -42,16 +43,18 @@ def bootstrap(release, components, target, mirror, arch):
 
 	components = ','.join(components)
 	cmd = "debootstrap --variant=minbase --components=%s --arch=%s %s %s %s" % (components, arch, release, target, mirror)
-	_launchProc(cmd)
+	launchProc(cmd)
 
-def installPackages(packages, target, release, mirrors, sysmount):
+def mountKernFs(target):
+	for fs in ['/proc', '/sys']:
+		launchProc("mount -o bind %s %s" % (fs, target+fs))
+
+def umountKernFs(target):
+	for fs in ['/sys', '/proc']:
+		launchProc("umount %s" % target+fs)
+
+def installPackages(packages, target, release, mirrors):
 	""" Given a list of packages, installs them in a target chroot-able directory. """
-
-	if sysmount:
-		log.info("   Mounting filesystems...")
-		for fs in [('proc', '/proc'), ('sysfs', '/sys')]:
-			log.info("      " + fs[1])
-			_launchProc("mount none -t %s %s" % (fs[0], target+fs[1]))
 
 	# add additional entries to target's /etc/apt/sources.list file
 	if mirrors:
@@ -70,7 +73,7 @@ def installPackages(packages, target, release, mirrors, sysmount):
 	# first, sync with repo
 	log.info("   Updating package lists...")
 	cmd = "chroot %s apt-get -y update" % target
-	_launchProc(cmd)
+	launchProc(cmd)
 
 	# and now install packages one by one
 	env = {
@@ -81,18 +84,11 @@ def installPackages(packages, target, release, mirrors, sysmount):
 	for p in packages:
 		log.info("   Installing '" + p + "'...")
 		cmd = "chroot %s apt-get -y --force-yes install %s" % (target, p)
-		_launchProc(cmd, env)
+		launchProc(cmd, env)
 
 	# clean cache
-	_launchProc("chroot %s apt-get -y clean" % target)
-	_launchProc("chroot %s apt-get -y autoclean" % target)
-
-	if sysmount:
-		#log.info("   Unmounting filesystems...")
-		#for fs in ['/sys', '/proc']:
-		#	log.info("      " + fs)
-		#	_launchProc("umount %s" % target+fs)
-		pass
+	launchProc("chroot %s apt-get -y clean" % target)
+	launchProc("chroot %s apt-get -y autoclean" % target)
 
 if __name__ == "__main__":
 	startTime = time.time()
@@ -138,7 +134,7 @@ if __name__ == "__main__":
 				fresh = False
 		args.rebuild = fresh
 
-	_launchProc("touch .lock")
+	launchProc("touch .lock")
 
 	if args.rebuild:
 		log.info("Proceeding with fresh build...")
@@ -157,15 +153,23 @@ if __name__ == "__main__":
 		except:
 			pass
 
-		if 'release' in args.targets:
-			log.info("Building release system...")
-			_launchProc("cp -r .bootstrap .release")
-			installPackages(cfg['packages'], ".release", cfg['release'], cfg['package-mirrors'], mountfs)
+		for t in args.targets:
+			log.info("Building %s system..." % t)
+			launchProc("cp -r .bootstrap .%s" % t)
 
-		if 'devel' in args.targets:
-			log.info("Building development system...")
-			_launchProc("cp -r .bootstrap .devel")
-			installPackages(cfg['packages-dev'], ".devel", cfg['release'], cfg['package-mirrors'], mountfs)
+			packages = None
+			if t == 'release':
+				packages = cfg['packages']
+			else:
+				packages = cfg['packages-dev']
+
+			if mountfs:
+				mountKernFs('.'+t)
+
+			installPackages(packages, '.'+t, cfg['release'], cfg['package-mirrors'])
+			
+			if mountfs:
+				umountKernFs('.'+t)
 
 		log.info("Cleaning up bootstrap system...")
 		shutil.rmtree(".bootstrap")
@@ -173,15 +177,18 @@ if __name__ == "__main__":
 	# apply add-ons
 	for t in args.targets:
 		if os.path.exists("." + t):
-			if not os.path.exists(t + "-addon"):
+			# Cleanup the already built target
+			if os.path.exists(t):
+				shutil.rmtree(t)
+
+			launchProc("cp -r .%s %s" % (t, t))
+
+			if not os.path.exists(t + "-addon") or not os.listdir(t + '-addon'):
 				log.warning("Add-on for target '%s' does not exist, skipped!" % t)
 				continue
 
 			log.info("Applying '%s-addon'..." % t)
-			if os.path.exists(t):
-				shutil.rmtree(t)
-			_launchProc("cp -r .%s %s" % (t, t))
-			_launchProc("cp -r %s-addon/* %s" % (t, t))
+			launchProc("cp -rf %s-addon/* %s" % (t, t))
 
 		else:
 			log.warning("Target '%s' was not built, add-on applying skipped!" % t)

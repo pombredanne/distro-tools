@@ -133,7 +133,7 @@ def installSystem(archive, mountPoint, device):
 			env = {
 				'DEBIAN_FRONTEND': "noninteractive",
 				'PATH': "/bin:/sbin:/usr/bin:/usr/sbin",
-				'BOOTLOADER_DEVICE': device,
+				'INSTALL_DEVICE': device,
 			}
 			print "Executing post-install setup script..."
 			_exec("chroot %s /setup" % mountPoint, env=env)
