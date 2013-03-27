@@ -1,5 +1,5 @@
 default Linux
-say "Booting Officine Maya installation system..."
+say "Booting Linux..."
 
 label Linux
 	kernel /vmlinuz

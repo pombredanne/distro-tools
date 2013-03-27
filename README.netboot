@@ -1,0 +1,133 @@
+--------------------------------------------------------------------------------
+    Boot from network HOW-TO.
+--------------------------------------------------------------------------------
+
+The distro-tools package contains a minimal Linux distribution ready for network
+boots. It provides a Busybox environment and a working Python 2.7 interpreter,
+which are enough to allow execution of simple installers. The kernel and the
+tools are built for amd64 architecture but this how-to probably will be valid
+for any other arch.
+
+The setup described here should work on any Debian-based Linux distribution.  On
+other distros, different package names and configuration file paths may apply.
+
+    1. Boot-up sequence
+The overall boot process in the network context consists of these steps:
+
+  a) The client machine BIOS is configured to boot from network. This feature is
+  supported by almost all modern BIOSes.
+
+  b) The client machine network card is connected to the host machine directly
+  or through an ethernet switch.
+
+  c) Machine is powered on and sends special DHCP request packets, requesting an
+  IP address.
+
+  d) The DHCP server, properly configured, offers the client an IP in the given
+  address range.
+
+  c) The client BIOS browses the remote direcotry, looking for something
+  bootable. The DHCP server says that it's the pxelinux.0 file. So, the BIOS
+  grabs it and executes the bootloader, which in turn grabs the Linux kernel and
+  the initial ramdisk image from the server, loads them into memory and passes
+  the control to the kernel. At this point Linux starts.
+
+  d) The kernel decompresses itself and the initial ramdisk and does everything
+  that it normally does: initializes devices, mounts the ramdisk as temporary
+  root, loads driver modules from it if needed and the boot proceeds.
+
+  e) When the boot process is finished, the kernel mounts the real root device.
+  Since it was instructed to boot from NFS, it mounts a remote NFS directory as
+  local root. It connects to the NFS server, which address was passed by the
+  bootloader, and mounts the specified directory at /, swapping out the ramdisk.
+
+  f) At this point the kernel executes the init program, which by default is
+  searched in /sbin/init. This is the first process executed by the system, and
+  it can be anything executable: a bash script, a python script, a static or
+  dynamic executable, anything that the system can execute. Note, that in case
+  of dynamic executables, all libraries that are needed by the program at
+  runtime must be present. Script execution requires a working interpreter. The
+  mini-distro has a minimal Bash-like shell and a complete Python interpreter.
+  The init process usually mounts other filesystems, starts services, shells and
+  other stuff. In our case the init program is the one provided by Busybox and
+  it simply mounts some essential filesystems and executes the /installer
+  script. You can (and should) substitute that with anything else useful for
+  your needs.
+
+    2. Configuring DHCP and TFTP servers for PXE
+First, ensure you have the isc-dhcp-server and tftpd-hpa packages installed.
+We suppose, for simplicity, that the network interface on which your network
+boot service will run is eth0.
+
+    a) Edit the file /etc/default/isc-dhcp-server and specify the interfaces on
+    which you want the DHCP server to serve. Ensure the line is uncommented and
+    it looks like:
+
+        INTERFACES="eth0"
+
+    b) Edit the /etc/default/tftp-hpa file and specify which directory should
+    the TFPT server export in the 'TFTP_DIRECTORY' entry. You can leave the
+    default value. Whatever option you have chosen, the directory must contain
+    the contents of `netboot` directory. Just copy everything from it into TFTP
+    root dir. That is our bootloader stuff.
+
+    c) Open the /etc/dhcp/dhcpd.conf file. Here we have to setup our PXE-boot
+    aware subnet. Just pick some IP address range and mask that does not
+    conflict with anything you have already configured on the system. A minimal
+    and working setup example:
+
+        subnet 192.168.100.0 netmask 255.255.255.0 {
+            range 192.168.100.2 192.168.100.10;
+            filename "pxelinux.0";
+        }
+
+    In this example configuration the DHCP server will offer IP addresses in the
+    given range to anyone requesting them at the interface eth0. Also, if
+    requested, it will serve the `pxelinux.0` file, which actually is our
+    bootloader. The actual bootloader upload is done by the TFTP server.
+
+    3. Configuring the NFS server
+The actual root directory is exported by the NFS server. Install the package
+`nfs-kernel-server`, if you don't have it installed. Then open the file located
+at /etc/exports and add a line related like this:
+    
+    /srv/installer-fs *(ro,no_root_squash,no_all_squash,no_subtree_check)
+
+In this example we assume that the installer-fs directory is simply copied
+into /srv directory. It will be exported to anyone, even on other network
+interfaces (the asterisk is a wildcard). Read the exports(5) manual page for
+more information, especially for the network restriction.
+
+    4. Prepare for boot
+The last step to do before you can finally plug your ready-to-destroy PC in the
+ethernet hub, is configuring the bootloader. Open the
+/srv/tftpboot/pxelinux.cfg/default config file, find the kernel parameters line,
+which starts with 'append ...' and substitute the
+'nfsroot=<SERVER:/PATH/TO/NFSROOT>' string with something real, our setup will
+be the following:
+
+    ... nfsroot=192.168.100.1/srv/rootfs quiet ro ... 
+
+Note the IP address. Yep, the first host in our previously configured subnet
+should be the NFS server. This means that the interface on which the NFS server
+is running must be configured that way. Simple!
+
+    # ifconfig eth0 up 192.168.100.1
+
+It's better to disable the network-manager service first, typically present on
+all Ubuntu and Debian installations, since it will cause problems:
+
+    # stop network-manager
+
+Now we're ready to start everything:
+
+    # start isc-dhcp-server
+    # start tftpd-hpa
+    # start nfs-kernel-daemon
+
+At this point everything should work, the client will try to acquire an IP
+address after power-on, will execute the PXE compatible bootloader, then pass
+the control to the Linux kernel, which will mount the remote NFS root and
+execute /sbin/init, which in turn executes the installer. At that point the
+installer (probably) will format disks and install the target distro created
+with distro-tools. Simple, isn't it? :) 

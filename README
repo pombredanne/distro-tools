@@ -1,3 +1,7 @@
+-------------------------------------------------------------------------------
+    About distro-tools
+-------------------------------------------------------------------------------
+
     1. General information
 Distro-tools is a tool for automated building of Linux distributions based
 on Debian and derivates.
@@ -13,9 +17,9 @@ if you need a Linux distro for your ATM or industrial mill, probably you may
 have to tailor it to your needs, like change the kernel, the bootsplash screen,
 use the framebuffer instead of X or simply, let it autostart one single
 application which interfaces with machine's user. 
-Being the Debian and Ubuntu systems available on many platforms and since they
-provide a very large and well maintained package repositories, the decision to
-use them as basis is obvious.
+Being the Debian and Ubuntu systems available on many architecture and since
+they provide a very large and well maintained package repositories, the decision
+to use them as basis is obvious.
 
     3. How it works
 The only thing that the user needs to specify is the configuration file for the
@@ -55,3 +59,11 @@ installable CDs or something like that is out of the scope of this tool. But you
 can use this tool to generate both distros, the LiveCD one, which runs the
 installer, and the "payload", which is the distro actually installed on disk by
 the installer. How these things are done depends on what you need.
+
+    5. Network install feature
+Well, when I said that there's no install facilities included, I was joking :P
+In the installer-fs directory there's a minimal Linux distro (built for x86-64),
+which has a Busybox toolset and a working Python interpreter. This distro is
+intended to be network-bootable and provides a runtime environment for custom
+installers. For more information about how to use it, read the README.netboot
+file.
