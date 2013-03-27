@@ -1,0 +1,57 @@
+    1. General information
+Distro-tools is a tool for automated building of Linux distributions based
+on Debian and derivates.
+
+The basic idea is to let the user describe the package set of the target
+distribution via simple text config file and let him do the customizations by
+specifying a directory with contents to be merged into stock distro.
+
+    2. What is useful for
+This tool aims to help the user create custom chroot environments, highly
+personalized distributions, embedded distros and stuff like that. For example,
+if you need a Linux distro for your ATM or industrial mill, probably you may
+have to tailor it to your needs, like change the kernel, the bootsplash screen,
+use the framebuffer instead of X or simply, let it autostart one single
+application which interfaces with machine's user. 
+Being the Debian and Ubuntu systems available on many platforms and since they
+provide a very large and well maintained package repositories, the decision to
+use them as basis is obvious.
+
+    3. How it works
+The only thing that the user needs to specify is the configuration file for the
+distribution it intends to build. Config files are simple JSON-formatted text
+files, where some parameters are specified and the tool, based on them, builds
+the requested distro. For example, the user specifies the target architecture,
+which may be arm, x86, x64 or anything else supported (and available) in the
+package repository from which the distribution is retrieved and built. Also,
+some other parameters must be specified, like the URL of the server which hosts
+the repository, the release which will act as a foundation (for example, it can
+be "squeeze" for latest stable Debian release at the moment of writing, or
+"precise" for Ubuntu, or anything else available in the chosen repository), the
+package categories, additional package mirrors (optional), the list of packages
+to include in the distro etc. Since usually in production environments there's a
+need to keep the development separated from release, the user can build from the
+same config file two distributions, one for release and one for development
+needs. Each can have (and often has) different packages installed, the
+development version usually includes compilers, library headers and other tools,
+and the release version contains only the minimal package set. Further
+customization is done by creating two directories, release-addon and
+devel-addon, for which the tool looks for when the basic distro is built. It
+simply applies the contents of those directories to the root of each distro.
+This way, you can include your own tools, programs, scripts, modified versions
+of files. Since the tool keeps track of the "stock" version of the distro, you
+can change at any time the contents of the addon directory and invoke the tool
+again, and it will recreate the final distro without rebuilding everything from
+scratch.
+
+    4. Target distribution installation
+The distribution which is produced by the tool does not contain any installation
+facilities, it may even not include a bootloader or a kernel, if not explicitly
+specified in package lists. This may be ok for development chroots, but if one
+wants to do an interactive install of the distro instead of manual copying the
+target directory to some partition, things become a little complex. What
+distro-tools generates is the "image". Everything related to LiveCDs,
+installable CDs or something like that is out of the scope of this tool. But you
+can use this tool to generate both distros, the LiveCD one, which runs the
+installer, and the "payload", which is the distro actually installed on disk by
+the installer. How these things are done depends on what you need.
