@@ -51,7 +51,13 @@ def mountKernFs(target):
 
 def umountKernFs(target):
 	for fs in ['/sys', '/proc']:
-		launchProc("umount %s" % target+fs)
+		flags = ''
+
+		# lazy umount for /proc, cause it fails sometimes -.-"
+		if fs == '/proc':
+			flags = flags + '-l'
+
+		launchProc("umount %s %s" % (flags,target+fs))
 
 def installPackages(packages, target, release, mirrors):
 	""" Given a list of packages, installs them in a target chroot-able directory. """
