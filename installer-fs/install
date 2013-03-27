@@ -3,12 +3,11 @@
 # welcome message
 clear
 echo "------------------------------------"
-echo "Officine Maya SRL"
-echo "Le.Dy 1000 series firmware installer"
+echo "  distro-tools automated installer  "
 echo "------------------------------------"
 echo
 
-# all is done by our branded installer (:
+# the actual installer :)
 /usr/bin/installer
 
 if [ $? == 0 ]; then
