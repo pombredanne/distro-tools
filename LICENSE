@@ -1,0 +1,10 @@
+The tools and the installer are in public domain.
+
+There are included some binaries though:
+    installer-fs/ - contains binary Linux modules and firmware, a Python
+                    installation with all its dependencies and the BusyBox
+                    toolset. This software is licensed under GNU GPL and
+                    other OSI approved licenses. 
+
+    netboot/      - contains PXELINUX executable and a Linux kernel image in
+                    binary form.  This software is licensed under GNU GPL.
