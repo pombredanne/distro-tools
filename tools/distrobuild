@@ -18,8 +18,9 @@ log.basicConfig(level=log.INFO, format='%(asctime)s %(message)s', datefmt='%m/%d
 
 
 def launchProc(cmd, env=None):
-	""" Executes a command in a subprocess, suppressing all output. If the command fails (return code is not 0), the stderr
-	is printed and the script exits with code 1. """
+	""" Executes a command in a subprocess, suppressing all output. If the
+	command fails (return code is not 0), the stderr is printed and an
+	exception is raised. """
 	with open(os.devnull, 'w') as devnull:
 		if VERBOSE:
 			proc = subprocess.Popen(cmd, shell=True, env=env)
@@ -27,16 +28,11 @@ def launchProc(cmd, env=None):
 			proc = subprocess.Popen(cmd, shell=True, stdin=devnull, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 		ret = proc.communicate()
 		if proc.returncode:
-			if not VERBOSE:
-				log.error("Error: " + '\n'.join(ret))
-			exit(1)
+			raise Exception(ret)
 
 def loadConfig(filename):
 	with open(filename) as f:
-		try:
-			return json.load(f)
-		except Exception as err:
-			log.error(err)
+		return json.load(f)
 
 def bootstrap(release, components, target, mirror, arch):
 	""" Crate a bootstrap chroot-ready system in a target directory. """
@@ -117,88 +113,92 @@ if __name__ == "__main__":
 			exit(1)
 
 	# load configuration
-	cfg = loadConfig(args.config)
-	log.info("JSON configuration file loaded")
+	try:
+		cfg = loadConfig(args.config)
+		log.info("JSON configuration file loaded")
 
-	VERBOSE = args.verbose
+		VERBOSE = args.verbose
 
-	# check if the script is launched as root
-	if not os.getuid() == 0:
-		log.error("Need to be launched as root!")
-		exit(1)
+		# check if the script is launched as root
+		if not os.getuid() == 0:
+			log.error("Need to be launched as root!")
+			exit(1)
 
-	# in case of interrupted last run or fresh new build request, cleanup
-	# everything
-	if os.path.exists(".lock"):
-		log.info("Last run was interrupted!")
-		os.remove(".lock")
-		args.rebuild = True
-	elif not args.rebuild:
-		fresh = True
-		for path in ['.devel', '.release']:
-			if os.path.exists(path):
-				fresh = False
-		args.rebuild = fresh
-
-	launchProc("touch .lock")
-
-	if args.rebuild:
-		log.info("Proceeding with fresh build...")
-		for t in args.targets:
-			for path in [t, '.'+t]:
+		# in case of interrupted last run or fresh new build request, cleanup
+		# everything
+		if os.path.exists(".lock"):
+			log.info("Last run was interrupted!")
+			os.remove(".lock")
+			args.rebuild = True
+		elif not args.rebuild:
+			fresh = True
+			for path in ['.devel', '.release']:
 				if os.path.exists(path):
-					log.info("   Wiping '%s'..." % path)
-					shutil.rmtree(path)
+					fresh = False
+			args.rebuild = fresh
 
-		log.info("Building bootstrap system...")
-		bootstrap(cfg['release'], cfg['components'], ".bootstrap", cfg['bootstrap-mirror'], cfg['arch'])
+		launchProc("touch .lock")
 
-		mountfs = False
-		try:
-			mountfs = cfg['sysmount']
-		except:
-			pass
+		if args.rebuild:
+			log.info("Proceeding with fresh build...")
+			for t in args.targets:
+				for path in [t, '.'+t]:
+					if os.path.exists(path):
+						log.info("   Wiping '%s'..." % path)
+						shutil.rmtree(path)
 
+			log.info("Building bootstrap system...")
+			bootstrap(cfg['release'], cfg['components'], ".bootstrap", cfg['bootstrap-mirror'], cfg['arch'])
+
+			mountfs = False
+			try:
+				mountfs = cfg['sysmount']
+			except:
+				pass
+
+			for t in args.targets:
+				log.info("Building %s system..." % t)
+				launchProc("cp -r .bootstrap .%s" % t)
+
+				packages = None
+				if t == 'release':
+					packages = cfg['packages']
+				else:
+					packages = cfg['packages-dev']
+
+				if mountfs:
+					mountKernFs('.'+t)
+
+				installPackages(packages, '.'+t, cfg['release'], cfg['package-mirrors'])
+
+				if mountfs:
+					umountKernFs('.'+t)
+
+			log.info("Cleaning up bootstrap system...")
+			shutil.rmtree(".bootstrap")
+
+		# apply add-ons
 		for t in args.targets:
-			log.info("Building %s system..." % t)
-			launchProc("cp -r .bootstrap .%s" % t)
+			if os.path.exists("." + t):
+				# Cleanup the already built target
+				if os.path.exists(t):
+					shutil.rmtree(t)
 
-			packages = None
-			if t == 'release':
-				packages = cfg['packages']
+				launchProc("cp -r .%s %s" % (t, t))
+
+				if not os.path.exists(t + "-addon") or not os.listdir(t + '-addon'):
+					log.warning("Add-on for target '%s' does not exist, skipped!" % t)
+					continue
+
+				log.info("Applying '%s-addon'..." % t)
+				launchProc("cp -rf %s-addon/* %s" % (t, t))
+
 			else:
-				packages = cfg['packages-dev']
-
-			if mountfs:
-				mountKernFs('.'+t)
-
-			installPackages(packages, '.'+t, cfg['release'], cfg['package-mirrors'])
-			
-			if mountfs:
-				umountKernFs('.'+t)
-
-		log.info("Cleaning up bootstrap system...")
-		shutil.rmtree(".bootstrap")
-
-	# apply add-ons
-	for t in args.targets:
-		if os.path.exists("." + t):
-			# Cleanup the already built target
-			if os.path.exists(t):
-				shutil.rmtree(t)
-
-			launchProc("cp -r .%s %s" % (t, t))
-
-			if not os.path.exists(t + "-addon") or not os.listdir(t + '-addon'):
-				log.warning("Add-on for target '%s' does not exist, skipped!" % t)
+				log.warning("Target '%s' was not built, add-on applying skipped!" % t)
 				continue
-
-			log.info("Applying '%s-addon'..." % t)
-			launchProc("cp -rf %s-addon/* %s" % (t, t))
-
-		else:
-			log.warning("Target '%s' was not built, add-on applying skipped!" % t)
-			continue
+	except Exception as err:
+		log.error(err)
+		exit(1)
 
 	os.remove(".lock")
 	log.info("Finished in %s minutes." % str((time.time() - startTime)/60.0))
